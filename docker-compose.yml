@@ -1,0 +1,50 @@
+# Stack del reto 07/10
+#   Local : docker compose --profile local up -d --build
+#   Remoto: BACKEND_URL=http://<vm-azure>:8000 MODEL=<modelo> docker compose up -d --build api
+
+name: reto-07-10
+
+services:
+  ollama:
+    build: ./ollama
+    container_name: ollama
+    profiles: ["local"]            # solo se levanta en modo local
+    environment:
+      OLLAMA_MODEL: ${MODEL:-gemma4:e4b}
+      OLLAMA_KEEP_ALIVE: 30m       # mantiene el modelo cargado en memoria
+    volumes:
+      - ollama_models:/root/.ollama   # persistencia: el modelo se descarga una sola vez
+    networks: [ia_net]
+    # Sin "ports": Ollama no se expone al host, solo a la API por la red interna.
+    healthcheck:
+      test: ["CMD-SHELL", "ollama show ${MODEL:-gemma4:e4b} >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 120                 # hasta 20 min para la primera descarga
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: chat-api
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://ollama:11434}   # local por defecto (DNS interno de Docker)
+      BACKEND_API_KEY: ${BACKEND_API_KEY:-}
+      MODEL: ${MODEL:-gemma4:e4b}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    networks: [ia_net]
+    depends_on:
+      ollama:
+        condition: service_healthy
+        required: false            # en modo remoto Ollama no existe y no pasa nada
+    restart: unless-stopped
+
+networks:
+  ia_net:
+    name: ia_net
+    driver: bridge
+
+volumes:
+  ollama_models:
+    name: ollama_models
